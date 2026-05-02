@@ -1,10 +1,15 @@
 import tkinter as tk
+import sv_ttk
 from config.logger import logger
 from ui.app import CompressionApp
 
 def main():
     logger.info("Application starting...")
     root = tk.Tk()
+    
+    # Apply modern dark theme
+    sv_ttk.set_theme("dark")
+    
     app = CompressionApp(root)
     
     logger.info("Entering main loop")
