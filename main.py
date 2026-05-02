@@ -13,6 +13,7 @@ def main():
     app = CompressionApp(root)
     
     logger.info("Entering main loop")
+    root.protocol("WM_DELETE_WINDOW", lambda: root.destroy())
     root.mainloop()
     logger.info("Application shutting down...")
 
