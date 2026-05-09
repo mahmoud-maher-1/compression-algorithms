@@ -1,241 +1,208 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
-import os
+from tkinter import filedialog, ttk, scrolledtext
 import time
 import threading
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-
-from config.logger import logger
-from algorithms import rle_compress, huffman_compress, lzw_compress
+from algorithms import CompressionAlgorithms
 
 class CompressionApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Multimedia Compression Lab")
-        self.root.geometry("1000x750")
-        
-        # Make the main window resizable
-        self.root.rowconfigure(3, weight=1) # Allow the chart frame to expand
-        self.root.columnconfigure(0, weight=1)
+        self.root.geometry("1200x850")
+        self.root.configure(bg="#1e1e2e") # Dark background
 
-        self.file_path = ""
-        self.results = []
-        
-        # State variables for background thread communication
-        self.status_var = tk.StringVar(value="Ready")
-
-        logger.info("Initializing UI Components")
+        self.selected_algo = tk.StringVar(value="Huffman")
+        self.style = ttk.Style()
+        self.configure_styles()
         self.setup_ui()
 
-    def setup_ui(self):
-        # Header (Row 0)
-        header = ttk.Label(self.root, text="Multimedia File Compression System", font=("Segoe UI", 20, "bold"))
-        header.grid(row=0, column=0, pady=(20, 10))
-
-        # --- Controls Area ---
-        controls_container = ttk.Frame(self.root)
-        controls_container.grid(row=1, column=0, sticky="ew", padx=30, pady=10)
-        controls_container.columnconfigure(1, weight=1)
-
-        # File Selection Frame
-        file_frame = ttk.LabelFrame(controls_container, text=" 1. Select Multimedia File ")
-        file_frame.grid(row=0, column=0, sticky="ew", padx=(0, 10), pady=10)
+    def configure_styles(self):
+        self.style.theme_use('clam')
+        # Custom styles for a modern look
+        self.style.configure("TFrame", background="#1e1e2e")
+        self.style.configure("TLabel", background="#1e1e2e", foreground="#cdd6f4", font=("Segoe UI", 10))
+        self.style.configure("Header.TLabel", font=("Segoe UI", 20, "bold"), foreground="#89b4fa")
+        self.style.configure("Card.TLabelframe", background="#1e1e2e", foreground="#89b4fa", borderwidth=2)
+        self.style.configure("Card.TLabelframe.Label", font=("Segoe UI", 11, "bold"), foreground="#89b4fa")
         
-        self.btn_browse = ttk.Button(file_frame, text="Browse File", command=self.browse_file)
-        self.btn_browse.pack(side="left", padx=15, pady=15)
+        # Modern Button
+        self.style.configure("Action.TButton", font=("Segoe UI", 10, "bold"), padding=10, background="#89b4fa")
+        self.style.map("Action.TButton", background=[('active', '#74c7ec')])
 
-        self.lbl_file_details = ttk.Label(file_frame, text="No file selected", foreground="gray")
-        self.lbl_file_details.pack(side="left", padx=10)
+        # Modern Treeview
+        self.style.configure("Treeview", background="#313244", foreground="white", fieldbackground="#313244", borderwidth=0)
+        self.style.configure("Treeview.Heading", background="#45475a", foreground="white", font=("Segoe UI", 10, "bold"))
 
-        # Benchmark Action Frame
-        action_frame = ttk.Frame(controls_container)
-        action_frame.grid(row=0, column=1, sticky="e", pady=10)
+    def setup_ui(self):
+        # Header
+        ttk.Label(self.root, text="Multimedia Compression System", style="Header.TLabel").pack(pady=20)
 
-        self.btn_run = ttk.Button(action_frame, text="Run Compression Benchmark", state="disabled",
-                                  command=self.start_benchmark_thread, style="Accent.TButton")
-        self.btn_run.pack(pady=(15, 0))
+        main_container = ttk.Frame(self.root)
+        main_container.pack(fill="both", expand=True, padx=30)
 
-        # --- Progress and Status ---
-        status_frame = ttk.Frame(self.root)
-        status_frame.grid(row=2, column=0, sticky="ew", padx=30, pady=(0, 10))
-        status_frame.columnconfigure(1, weight=1)
+        # 1. Input Section
+        input_card = ttk.LabelFrame(main_container, text=" 1. Text Source ", style="Card.TLabelframe")
+        input_card.pack(fill="x", pady=10)
 
-        self.lbl_status = ttk.Label(status_frame, textvariable=self.status_var, font=("Segoe UI", 10, "italic"))
-        self.lbl_status.grid(row=0, column=0, sticky="w")
+        btn_row = ttk.Frame(input_card)
+        btn_row.pack(fill="x", padx=10, pady=5)
+        ttk.Button(btn_row, text="📂 Load File", command=self.load_file, style="Action.TButton").pack(side="left", padx=5)
+        ttk.Button(btn_row, text="🧹 Clear All", command=self.clear_input, style="Action.TButton").pack(side="left", padx=5)
 
-        self.progress = ttk.Progressbar(status_frame, mode='indeterminate')
-        self.progress.grid(row=0, column=1, sticky="ew", padx=(20, 0))
+        self.input_text = scrolledtext.ScrolledText(input_card, height=6, bg="#313244", fg="#cdd6f4", insertbackground="white", borderwidth=0, font=("Consolas", 11))
+        self.input_text.pack(fill="x", padx=15, pady=10)
 
-        # --- Main Content Area ---
-        content_container = ttk.Frame(self.root)
-        content_container.grid(row=3, column=0, sticky="nsew", padx=30, pady=(10, 20))
-        content_container.rowconfigure(1, weight=1)
-        content_container.columnconfigure(0, weight=1)
+        # 2. Controls
+        ctrl_card = ttk.Frame(main_container)
+        ctrl_card.pack(fill="x", pady=10)
 
-        # Comparison Table (Row 0)
-        table_frame = ttk.LabelFrame(content_container, text=" 2. Performance Comparison ")
-        table_frame.grid(row=0, column=0, sticky="ew", pady=(0, 15))
+        ttk.Label(ctrl_card, text="Algorithm:").pack(side="left", padx=5)
+        algo_combo = ttk.Combobox(ctrl_card, textvariable=self.selected_algo, 
+                                  values=["RLE", "Shannon-Fano", "Arithmetic", "Huffman", "LZW"], 
+                                  state="readonly", width=15)
+        algo_combo.pack(side="left", padx=10)
+
+        ttk.Button(ctrl_card, text="⚡ Compress", command=self.compress, style="Action.TButton").pack(side="left", padx=5)
+        ttk.Button(ctrl_card, text="📊 Compare All", command=self.start_comparison_thread, style="Action.TButton").pack(side="left", padx=5)
+        
+        self.progress = ttk.Progressbar(ctrl_card, orient="horizontal", length=200, mode="determinate")
+        self.progress.pack(side="right", padx=20)
+
+        # 3. Results Section
+        res_container = ttk.Frame(main_container)
+        res_container.pack(fill="both", expand=True, pady=10)
+
+        # Table (Left Side)
+        table_card = ttk.LabelFrame(res_container, text=" Results Table ", style="Card.TLabelframe")
+        table_card.pack(side="left", fill="both", expand=True, padx=(0, 10))
 
         cols = ("Algorithm", "Original (B)", "Compressed (B)", "Ratio", "Time (ms)")
-        self.tree = ttk.Treeview(table_frame, columns=cols, show="headings", height=4)
+        self.tree = ttk.Treeview(table_card, columns=cols, show="headings", height=8)
         for col in cols:
             self.tree.heading(col, text=col)
-            self.tree.column(col, anchor="center")
-        self.tree.pack(fill="x", padx=15, pady=15)
+            self.tree.column(col, width=100, anchor="center")
+        self.tree.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Chart Frame (Row 1)
-        self.chart_frame = ttk.Frame(content_container)
-        self.chart_frame.grid(row=1, column=0, sticky="nsew")
+        # Chart (Right Side)
+        chart_card = ttk.LabelFrame(res_container, text=" Efficiency Graph ", style="Card.TLabelframe")
+        chart_card.pack(side="right", fill="both", expand=True)
+        self.chart_frame = tk.Frame(chart_card, bg="#1e1e2e")
+        self.chart_frame.pack(fill="both", expand=True)
+
+    # --- Logic ---
+
+    def load_file(self):
+        path = filedialog.askopenfilename(filetypes=[("Text", "*.txt")])
+        if path:
+            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                self.input_text.delete("1.0", tk.END)
+                self.input_text.insert("1.0", f.read())
+
+    def clear_input(self):
+        self.input_text.delete("1.0", tk.END)
+        for row in self.tree.get_children(): self.tree.delete(row)
+        for w in self.chart_frame.winfo_children(): w.destroy()
+        self.progress['value'] = 0
+
+    def compress(self):
+        data = self.input_text.get("1.0", tk.END).strip()
+        # Auto-ignore non-ascii characters to prevent dictionary errors
+        data = data.encode("ascii", "ignore").decode("ascii")
+        if not data: return
         
-        # Apply modern style accent to primary button if supported
-        style = ttk.Style()
-        style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"))
-
-    def browse_file(self):
-        self.file_path = filedialog.askopenfilename(
-            filetypes=[("Multimedia Files", "*.txt *.pdf *.png *.jpg"), ("All Files", "*.*")])
-        if self.file_path:
-            f_name = os.path.basename(self.file_path)
-            f_size = os.path.getsize(self.file_path)
-            self.lbl_file_details.config(text=f"{f_name}  |  {f_size:,} Bytes")
-            self.btn_run.config(state="normal")
-            self.status_var.set("Ready to compress.")
-            logger.info(f"File selected: {self.file_path} (Size: {f_size} bytes)")
-
-    def start_benchmark_thread(self):
-        """Disables UI elements and spawns a background thread to prevent UI freezing."""
-        # Update UI state
-        self.btn_run.config(state="disabled")
-        self.btn_browse.config(state="disabled")
-        self.progress.start(10) # Start indeterminate progress spinner
+        algo = self.selected_algo.get()
+        funcs = {
+            "RLE": CompressionAlgorithms.rle_compress,
+            "Shannon-Fano": CompressionAlgorithms.shannon_fano_compress,
+            "Arithmetic": CompressionAlgorithms.arithmetic_compress,
+            "Huffman": CompressionAlgorithms.huffman_compress,
+            "LZW": CompressionAlgorithms.lzw_compress
+        }
         
-        # Clear previous results
-        for i in self.tree.get_children(): 
-            self.tree.delete(i)
-        for widget in self.chart_frame.winfo_children():
-            widget.destroy()
+        start = time.perf_counter()
+        comp = funcs[algo](data)
+        end = time.perf_counter()
+        
+        size = len(comp) // 8 if algo in ["Shannon-Fano", "Arithmetic", "Huffman"] else len(comp)
+        ratio = len(data) / max(size, 1)
+        
+        # Clear and update table for single view
+        for row in self.tree.get_children(): self.tree.delete(row)
+        self.tree.insert("", "end", values=(algo, len(data), size, f"{ratio:.2f}x", f"{(end-start)*1000:.2f}"))
 
-        # Start background thread
-        thread = threading.Thread(target=self.run_benchmark_worker, daemon=True)
-        thread.start()
+    def start_comparison_thread(self):
+        # Run in thread to keep GUI responsive during animation
+        threading.Thread(target=self.compare_all, daemon=True).start()
 
-    def run_benchmark_worker(self):
-        """Executes the compression algorithms. Runs entirely in a background thread."""
-        logger.info(f"Running benchmark on {self.file_path}")
-        self._update_status_threadsafe("Reading file...")
+    def compare_all(self):
+        data = self.input_text.get("1.0", tk.END).strip()
+        # Auto-ignore non-ascii characters to prevent dictionary errors
+        data = data.encode("ascii", "ignore").decode("ascii")
+        if not data: return
 
-        try:
-            with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                data = f.read()
-        except Exception as e:
-            logger.error(f"Error reading file: {e}")
-            self.root.after(0, lambda err=e: messagebox.showerror("Error", f"Could not read file: {err}"))
-            self._reset_ui_threadsafe()
-            return
-
-        original_size = len(data)
-        if original_size == 0:
-            logger.warning("Selected file is empty")
-            self.root.after(0, lambda: messagebox.showwarning("Warning", "File is empty!"))
-            self._reset_ui_threadsafe()
-            return
-
-        has_non_ascii = any(ord(c) >= 256 for c in data)
-        if has_non_ascii:
-            logger.warning("File contains non-ASCII characters. These will be ignored by LZW.")
-            self.root.after(0, lambda: messagebox.showwarning("Warning", "The file contains non-ASCII characters.\nThese will be ignored by the LZW compression algorithm."))
-
+        self.root.after(0, lambda: self.tree.delete(*self.tree.get_children()))
         algos = [
-            ("RLE", rle_compress),
-            ("Huffman", huffman_compress),
-            ("LZW", lzw_compress)
+            ("RLE", CompressionAlgorithms.rle_compress),
+            ("Shannon-Fano", CompressionAlgorithms.shannon_fano_compress),
+            "Arithmetic", CompressionAlgorithms.arithmetic_compress,
+            "Huffman", CompressionAlgorithms.huffman_compress,
+            "LZW", CompressionAlgorithms.lzw_compress
         ]
 
-        self.results = []
-
-        for name, func in algos:
-            self._update_status_threadsafe(f"Processing {name} Compression...")
-            logger.info(f"Executing {name} algorithm")
+        results = []
+        for i, (name, func) in enumerate(algos):
+            # Update Progress Bar
+            progress_val = ((i + 1) / len(algos)) * 100
+            self.root.after(0, lambda v=progress_val: self.progress.configure(value=v))
             
-            start_t = time.perf_counter()
-            compressed_data = func(data)
-            end_t = time.perf_counter()
-
-            if name == "Huffman":
-                comp_size = len(compressed_data) // 8  # Bits to Bytes
-            else:
-                comp_size = len(str(compressed_data))
-
-            ratio = original_size / comp_size if comp_size > 0 else 0
-            exec_time = (end_t - start_t) * 1000  # ms
-
-            # Pass the result back to the main thread to update the table
-            result_data = (name, original_size, comp_size, ratio, exec_time)
-            self.results.append((name, ratio))
-            self.root.after(0, self._insert_tree_item, result_data)
-
-            logger.info(f"{name} completed: Ratio={ratio:.2f}x, Time={exec_time:.3f}ms")
+            start = time.perf_counter()
+            comp = func(data)
+            end = time.perf_counter()
             
-            # Small artificial sleep just to make the progress bar and status transitions visible
-            # since small text files compress almost instantly.
-            time.sleep(0.3)
+            # Logic: bit strings are divided by 8 to get bytes
+            size = len(comp) // 8 if name in ["Shannon-Fano", "Arithmetic", "Huffman"] else len(comp)
+            ratio = len(data) / max(size, 1)
+            results.append((name, len(data), size, ratio, (end-start)*1000))
+            
+            # Dynamic table update
+            self.root.after(0, lambda n=name, o=len(data), s=size, r=ratio, t=(end-start)*1000: 
+                           self.tree.insert("", "end", values=(n, o, s, f"{r:.2f}x", f"{t:.2f}")))
+            time.sleep(0.2) # Small delay to show animation
 
-        # Final UI updates
-        self._update_status_threadsafe("Generating Performance Chart...")
-        self.root.after(0, self.update_chart)
-        self._reset_ui_threadsafe()
+        self.root.after(0, lambda: self.draw_chart(results))
 
-    def _insert_tree_item(self, data):
-        """Thread-safe method to insert a row into the treeview."""
-        name, original, comp, ratio, exec_time = data
-        self.tree.insert("", "end", values=(name, f"{original:,}", f"{comp:,}", f"{ratio:.2f}x", f"{exec_time:.3f}"))
+    def draw_chart(self, results):
+        for w in self.chart_frame.winfo_children(): w.destroy()
+        
+        names = [r[0] for r in results]
+        # Calculate size difference (Original - Compressed)
+        differences = [r[1] - r[2] for r in results]
 
-    def _update_status_threadsafe(self, msg):
-        """Thread-safe method to update status label."""
-        self.root.after(0, lambda: self.status_var.set(msg))
-
-    def _reset_ui_threadsafe(self):
-        """Thread-safe method to restore UI controls after benchmark is done."""
-        def reset():
-            self.progress.stop()
-            self.btn_run.config(state="normal")
-            self.btn_browse.config(state="normal")
-            self.status_var.set("Benchmark Complete.")
-        self.root.after(0, reset)
-
-    def update_chart(self):
-        logger.debug("Updating performance chart")
-
-        names = [r[0] for r in self.results]
-        ratios = [r[1] for r in self.results]
-
-        # Use a modern styling for the plot to match the dark theme
+        # Use a dark style for the plot
         plt.style.use('dark_background')
-        fig, ax = plt.subplots(figsize=(6, 4))
+        fig, ax = plt.subplots(figsize=(5, 4), dpi=100)
+        fig.patch.set_facecolor('#1e1e2e')
+        ax.set_facecolor('#1e1e2e')
         
-        # Transparent background for the plot area
-        fig.patch.set_facecolor('#1c1c1c') 
-        ax.set_facecolor('#1c1c1c')
+        colors = ['#f38ba8', '#89b4fa', '#a6e3a1', '#cba6f7', '#f9e2af']
+        bars = ax.bar(names, differences, color=colors)
         
-        # Plot with modern colors
-        bars = ax.bar(names, ratios, color=['#0078D7', '#881798', '#10893E'], width=0.6)
-        
-        ax.axhline(1, color='#ff5555', linewidth=1.5, linestyle='--')  # 1x line
-        ax.set_ylabel('Compression Ratio (Higher is Better)', color='#dddddd')
-        ax.set_title('Efficiency Benchmark', color='white', pad=15)
+        ax.set_ylabel('Difference (Bytes)', fontsize=9)
+        ax.axhline(0, color='gray', linewidth=0.8)
+        ax.tick_params(axis='x', labelsize=8)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
 
-        # Remove borders
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-            
-        ax.tick_params(colors='#dddddd')
-
-        # Add values on top of bars
+        y_min, y_max = ax.get_ylim()
+        padding = (y_max - y_min) * 0.15
+        ax.set_ylim(y_min - padding if y_min < 0 else 0, y_max + padding)
+        
         for bar in bars:
             yval = bar.get_height()
-            ax.text(bar.get_x() + bar.get_width() / 2, yval + 0.05, f'{yval:.2f}x', 
-                    ha='center', va='bottom', color='white', fontweight='bold')
+            ax.text(bar.get_x() + bar.get_width()/2, yval, f'{int(yval)}B', 
+                    ha='center', va='bottom' if yval >= 0 else 'top', fontsize=8, color='white')
 
         canvas = FigureCanvasTkAgg(fig, master=self.chart_frame)
         canvas.draw()
