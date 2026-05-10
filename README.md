@@ -102,7 +102,6 @@ matplotlib>=3.5.0
 
 ## ⚠️ Limitations
 
-- **Text only** – the algorithms operate on character streams. They are not applied directly to binary files or multimedia formats.
 - **Arithmetic Coding** is a simplified textbook implementation. For large inputs it uses a truncated sample and a placeholder bit‑pattern; ratio results may therefore be approximate.
 - Size measurements for bit‑oriented outputs (Shannon‑Fano, Arithmetic, Huffman) convert bits to bytes by integer division, simulating a realistic storage scenario but not an exact binary file.
 - The primary goal is **educational demonstration** – not production compression speed or efficiency.
